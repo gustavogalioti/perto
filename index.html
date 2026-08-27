@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Perto — ache seu grupo no meio da multidão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #090c14;
+    --panel: #121729;
+    --panel-2: #171d33;
+    --ring: #2a3252;
+    --accent: #34d3c9;
+    --accent-dim: rgba(52,211,201,0.18);
+    --text: #f2f4fa;
+    --muted: #8892b0;
+    --danger: #ff6b6b;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background: radial-gradient(120% 120% at 50% -10%, #131a30 0%, #090c14 55%);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    overflow:hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1,h2,h3,.display{ font-family:'Space Grotesk', sans-serif; letter-spacing:-0.01em; }
+  button{ font-family:inherit; }
+
+  /* ---------- Tela de entrada ---------- */
+  #gate{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    padding:24px;
+  }
+  .card{
+    width:100%; max-width:380px; background:var(--panel);
+    border:1px solid var(--ring); border-radius:20px; padding:32px 28px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .eyebrow{
+    font-size:12px; text-transform:uppercase; letter-spacing:0.14em; color:var(--accent);
+    margin:0 0 10px;
+  }
+  .card h1{ font-size:26px; margin:0 0 8px; }
+  .card p.sub{ color:var(--muted); font-size:14px; line-height:1.5; margin:0 0 24px; }
+  label{ display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  input[type=text]{
+    width:100%; padding:14px 16px; border-radius:12px; border:1px solid var(--ring);
+    background:var(--panel-2); color:var(--text); font-size:16px; margin-bottom:18px; outline:none;
+  }
+  input[type=text]:focus{ border-color:var(--accent); }
+  .btn{
+    width:100%; padding:14px 16px; border-radius:12px; border:none; cursor:pointer;
+    background:var(--accent); color:#06110f; font-weight:600; font-size:15px;
+    transition:transform .12s ease, opacity .12s ease;
+  }
+  .btn:active{ transform:scale(0.98); }
+  .btn.secondary{
+    background:transparent; border:1px solid var(--ring); color:var(--text); margin-top:10px;
+  }
+  .btn:disabled{ opacity:0.5; cursor:default; }
+  .room-badge{
+    display:inline-flex; align-items:center; gap:8px; background:var(--panel-2);
+    border:1px solid var(--ring); border-radius:999px; padding:8px 14px; font-size:13px; color:var(--muted);
+    margin-bottom:18px;
+  }
+  .room-badge b{ color:var(--text); letter-spacing:0.06em; }
+  .hint{ font-size:12px; color:var(--muted); margin-top:14px; line-height:1.5; }
+
+  /* ---------- Sala ---------- */
+  #room{ position:fixed; inset:0; display:none; flex-direction:column; }
+  #topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; padding-top: max(14px, env(safe-area-inset-top));
+    border-bottom:1px solid var(--ring); background:rgba(9,12,20,0.6); backdrop-filter: blur(8px);
+    z-index:5;
+  }
+  #topbar .code{ font-size:13px; color:var(--muted); }
+  #topbar .code b{ color:var(--accent); letter-spacing:0.08em; }
+  .icon-btn{
+    background:var(--panel-2); border:1px solid var(--ring); color:var(--text);
+    border-radius:10px; padding:8px 12px; font-size:13px; cursor:pointer; display:flex; gap:6px; align-items:center;
+  }
+  .top-actions{ display:flex; gap:8px; }
+
+  #stage{ position:relative; flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+
+  .radar-wrap{ position:relative; width:min(84vw, 420px); height:min(84vw, 420px); }
+  svg.radar{ width:100%; height:100%; display:block; }
+  .sweep{ transform-origin: 50% 50%; animation: spin 6s linear infinite; }
+  @media (prefers-reduced-motion: reduce){ .sweep{ animation:none; } }
+  @keyframes spin{ from{ transform:rotate(0deg);} to{ transform:rotate(360deg);} }
+
+  .me-dot{ fill:var(--text); }
+  .n-label{ fill:var(--muted); font-size:11px; font-family:'Inter',sans-serif; }
+
+  .beacon{
+    position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center;
+    gap:4px; pointer-events:none;
+  }
+  .beacon .dot{
+    width:16px; height:16px; border-radius:50%; box-shadow:0 0 0 4px rgba(255,255,255,0.06);
+    position:relative;
+  }
+  .beacon .dot::after{
+    content:''; position:absolute; inset:-6px; border-radius:50%; opacity:.55;
+    background:inherit; filter:blur(4px);
+  }
+  .beacon .label{
+    font-size:11px; background:rgba(9,12,20,0.75); border:1px solid var(--ring); padding:3px 8px;
+    border-radius:999px; white-space:nowrap; color:var(--text);
+  }
+  .beacon .dist{ color:var(--muted); }
+
+  #empty-state{
+    position:absolute; text-align:center; color:var(--muted); font-size:13px; max-width:220px; line-height:1.5;
+  }
+
+  #status-strip{
+    position:absolute; bottom:14px; left:0; right:0; display:flex; justify-content:center;
+    pointer-events:none;
+  }
+  #status-strip span{
+    background:var(--panel); border:1px solid var(--ring); color:var(--muted); font-size:12px;
+    padding:6px 12px; border-radius:999px;
+  }
+
+  /* ---------- Chat ---------- */
+  #chat-toggle{
+    position:fixed; right:16px; bottom:calc(16px + env(safe-area-inset-bottom));
+    width:52px; height:52px; border-radius:50%; background:var(--accent); border:none; color:#06110f;
+    font-size:20px; cursor:pointer; box-shadow:0 10px 30px rgba(52,211,201,0.35); z-index:10;
+  }
+  #chat-sheet{
+    position:fixed; left:0; right:0; bottom:0; background:var(--panel); border-top:1px solid var(--ring);
+    border-radius:20px 20px 0 0; transform:translateY(100%); transition:transform .25s ease;
+    display:flex; flex-direction:column; height:60vh; z-index:9;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #chat-sheet.open{ transform:translateY(0); }
+  #chat-head{
+    display:flex; align-items:center; justify-content:space-between; padding:14px 16px;
+    border-bottom:1px solid var(--ring);
+  }
+  #chat-head h3{ margin:0; font-size:15px; }
+  #chat-head span{ font-size:12px; color:var(--muted); }
+  #chat-close{ background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; }
+  #chat-msgs{ flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .msg{ max-width:80%; }
+  .msg .who{ font-size:11px; color:var(--muted); margin-bottom:2px; }
+  .msg .bubble{ background:var(--panel-2); border:1px solid var(--ring); padding:8px 12px; border-radius:14px; font-size:14px; line-height:1.4; }
+  .msg.me{ align-self:flex-end; }
+  .msg.me .bubble{ background:var(--accent-dim); border-color:var(--accent); }
+  .msg.me .who{ text-align:right; }
+  #chat-form{ display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--ring); }
+  #chat-input{
+    flex:1; background:var(--panel-2); border:1px solid var(--ring); color:var(--text);
+    border-radius:12px; padding:12px 14px; font-size:15px; outline:none;
+  }
+  #chat-send{
+    background:var(--accent); border:none; color:#06110f; border-radius:12px; padding:0 18px; font-weight:600; cursor:pointer;
+  }
+
+  .toast{
+    position:fixed; top:14px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:999px;
+    font-size:13px; z-index:50; opacity:0; transition:opacity .2s ease; pointer-events:none;
+  }
+  .toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="card" id="gate-card">
+    <p class="eyebrow" id="gate-eyebrow">novo sinal</p>
+    <h1 id="gate-title">Perto</h1>
+    <p class="sub" id="gate-sub">Crie uma sala, mande o link pra galera e ache todo mundo num show, festa ou qualquer lugar lotado — sem senha, sem cadastro.</p>
+    <div id="room-badge-wrap"></div>
+    <label for="name-input">Como podemos te chamar?</label>
+    <input type="text" id="name-input" maxlength="24" placeholder="Seu nome" autocomplete="off">
+    <button class="btn" id="gate-btn">Criar sala</button>
+    <p class="hint" id="gate-hint">Ao entrar, vamos pedir permissão de localização — é o que faz o radar funcionar.</p>
+  </div>
+</div>
+
+<div id="room">
+  <div id="topbar">
+    <div class="code">sala <b id="room-code-label"></b></div>
+    <div class="top-actions">
+      <button class="icon-btn" id="copy-link-btn">🔗 Copiar link</button>
+      <button class="icon-btn" id="leave-btn">Sair</button>
+    </div>
+  </div>
+
+  <div id="stage">
+    <div class="radar-wrap">
+      <svg class="radar" viewBox="0 0 300 300">
+        <circle cx="150" cy="150" r="140" fill="none" stroke="var(--ring)" stroke-width="1"/>
+        <circle cx="150" cy="150" r="95" fill="none" stroke="var(--ring)" stroke-width="1"/>
+        <circle cx="150" cy="150" r="50" fill="none" stroke="var(--ring)" stroke-width="1"/>
+        <g class="sweep">
+          <path d="M150,150 L150,10 A140,140 0 0,1 220,32 Z" fill="var(--accent)" opacity="0.06"/>
+        </g>
+        <text x="150" y="20" text-anchor="middle" class="n-label" id="n-label">N</text>
+        <circle cx="150" cy="150" r="5" class="me-dot"/>
+      </svg>
+      <div id="beacon-layer"></div>
+      <div id="empty-state">Você está sozinho na sala por enquanto. Manda o link pra alguém entrar 👀</div>
+    </div>
+    <div id="status-strip"><span id="status-text">Localizando…</span></div>
+  </div>
+
+  <button id="chat-toggle" title="Chat">💬</button>
+  <div id="chat-sheet">
+    <div id="chat-head">
+      <div>
+        <h3>Chat da sala</h3>
+        <span>Nada é salvo — some quando a página fecha</span>
+      </div>
+      <button id="chat-close">✕</button>
+    </div>
+    <div id="chat-msgs"></div>
+    <form id="chat-form">
+      <input type="text" id="chat-input" placeholder="Escreva algo…" maxlength="300" autocomplete="off">
+      <button type="submit" id="chat-send">Enviar</button>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Utilidades ----------
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  let roomId = params.get('room');
+  const isJoining = !!roomId;
+
+  const userId = 'u' + Math.random().toString(36).slice(2, 10);
+  let userName = '';
+  let lastKnownPos = null;
+  let deviceHeading = 0;
+  let hasCompass = false;
+  let watchId = null;
+  let pollTimer = null;
+  let chatTimer = null;
+  let lastLocWrite = 0;
+  let knownChatCount = 0;
+  let stopped = false;
+
+  function toast(msg, ms){
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._h);
+    t._h = setTimeout(()=> t.classList.remove('show'), ms || 2200);
+  }
+
+  function makeRoomCode(){
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for(let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+
+  function colorForUser(id){
+    let h = 0;
+    for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) % 360;
+    return `hsl(${h}, 80%, 62%)`;
+  }
+
+  function toRad(d){ return d * Math.PI / 180; }
+  function toDeg(r){ return r * 180 / Math.PI; }
+
+  function bearingTo(lat1, lon1, lat2, lon2){
+    const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lon2 - lon1);
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  function distanceMeters(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const φ1 = toRad(lat1), φ2 = toRad(lat2);
+    const Δφ = toRad(lat2 - lat1), Δλ = toRad(lon2 - lon1);
+    const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function fmtDist(m){
+    if(m < 1000) return Math.round(m) + ' m';
+    return (m/1000).toFixed(1) + ' km';
+  }
+
+  // ---------- Gate (tela inicial) ----------
+  if(isJoining){
+    $('gate-eyebrow').textContent = 'você foi convidado';
+    $('gate-title').textContent = 'Entrar na sala';
+    $('gate-sub').textContent = 'Diga seu nome pra aparecer no radar de todo mundo que já está aqui.';
+    $('gate-btn').textContent = 'Entrar';
+    const badge = document.createElement('div');
+    badge.className = 'room-badge';
+    badge.innerHTML = `📍 código da sala <b>${roomId}</b>`;
+    $('room-badge-wrap').appendChild(badge);
+  }
+
+  $('name-input').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('gate-btn').click(); });
+
+  $('gate-btn').addEventListener('click', () => {
+    const name = $('name-input').value.trim();
+    if(!name){ toast('Escreve seu nome primeiro 🙂'); $('name-input').focus(); return; }
+    userName = name.slice(0, 24);
+    if(!roomId) roomId = makeRoomCode();
+    history.replaceState(null, '', location.pathname + '?room=' + roomId);
+    enterRoom();
+  });
+
+  // ---------- Entrar na sala ----------
+  function enterRoom(){
+    $('gate').style.display = 'none';
+    $('room').style.display = 'flex';
+    $('room-code-label').textContent = roomId;
+
+    requestGeolocation();
+    requestCompassIfNeeded();
+
+    pollTimer = setInterval(refreshPeers, 3000);
+    refreshPeers();
+
+    chatTimer = setInterval(pollChat, 2500);
+    pollChat();
+
+    window.addEventListener('pagehide', cleanup);
+    window.addEventListener('beforeunload', cleanup);
+  }
+
+  function requestGeolocation(){
+    if(!('geolocation' in navigator)){
+      $('status-text').textContent = 'Este navegador não tem suporte a localização';
+      return;
+    }
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        lastKnownPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        $('status-text').textContent = 'Sinal ativo — atualizando localização';
+        const now = Date.now();
+        if(now - lastLocWrite > 3500){
+          lastLocWrite = now;
+          writeMyLocation();
+        }
+      },
+      (err) => {
+        $('status-text').textContent = 'Localização bloqueada — libere nas permissões do navegador para aparecer no radar';
+      },
+      { enableHighAccuracy: true, maximumAge: 4000, timeout: 12000 }
+    );
+  }
+
+  function requestCompassIfNeeded(){
+    const start = () => {
+      hasCompass = true;
+      window.addEventListener('deviceorientationabsolute', onOrientation, true);
+      window.addEventListener('deviceorientation', onOrientation, true);
+    };
+    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      // iOS precisa de gesto do usuário; tentamos, se falhar seguimos com bússola fixa (norte para cima)
+      DeviceOrientationEvent.requestPermission().then(res => {
+        if(res === 'granted') start();
+      }).catch(()=>{});
+    } else {
+      start();
+    }
+  }
+
+  function onOrientation(e){
+    let heading;
+    if(typeof e.webkitCompassHeading === 'number'){
+      heading = e.webkitCompassHeading; // iOS: já é a direção da bússola
+    } else if(e.alpha != null){
+      heading = 360 - e.alpha; // aproximação para Android
+    } else {
+      return;
+    }
+    deviceHeading = (heading + 360) % 360;
+    $('n-label').setAttribute('transform', `rotate(${-deviceHeading} 150 150)`);
+  }
+
+  async function writeMyLocation(){
+    if(!lastKnownPos) return;
+    try{
+      await window.storage.set('loc:' + roomId + ':' + userId, JSON.stringify({
+        name: userName, lat: lastKnownPos.lat, lon: lastKnownPos.lon, ts: Date.now()
+      }), true);
+    }catch(err){ /* melhor esforço */ }
+  }
+
+  async function refreshPeers(){
+    if(!lastKnownPos && !stopped) { /* ainda mostra outros mesmo sem minha posição */ }
+    let list;
+    try{
+      list = await window.storage.list('loc:' + roomId + ':', true);
+    }catch(err){ return; }
+    if(!list || !list.keys) return;
+
+    const now = Date.now();
+    const peers = [];
+    for(const key of list.keys){
+      if(key === 'loc:' + roomId + ':' + userId) continue;
+      try{
+        const res = await window.storage.get(key, true);
+        if(!res || !res.value) continue;
+        const data = JSON.parse(res.value);
+        if(now - data.ts > 25000) continue; // sumiu (fechou a página / perdeu sinal)
+        peers.push(data);
+      }catch(err){ /* ignora entrada corrompida ou expirada */ }
+    }
+    renderBeacons(peers);
+  }
+
+  function renderBeacons(peers){
+    const layer = $('beacon-layer');
+    layer.innerHTML = '';
+    $('empty-state').style.display = peers.length === 0 ? 'block' : 'none';
+
+    if(!lastKnownPos){
+      if(peers.length){
+        $('status-text').textContent = 'Aguardando sua localização para calcular direção…';
+      }
+      return;
+    }
+
+    const wrap = document.querySelector('.radar-wrap');
+    const size = wrap.clientWidth;
+    const cx = size/2, cy = size/2, radius = size/2 - 24;
+
+    peers.forEach(p => {
+      const brg = bearingTo(lastKnownPos.lat, lastKnownPos.lon, p.lat, p.lon);
+      const dist = distanceMeters(lastKnownPos.lat, lastKnownPos.lon, p.lat, p.lon);
+      const angle = ((brg - deviceHeading) + 360) % 360;
+      const rad = toRad(angle);
+      const x = cx + radius * Math.sin(rad);
+      const y = cy - radius * Math.cos(rad);
+
+      const el = document.createElement('div');
+      el.className = 'beacon';
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      const color = colorForUser(p.name + '-' + brg.toFixed(0));
+      el.innerHTML = `
+        <div class="dot" style="background:${colorForUser(p.name)}"></div>
+        <div class="label">${escapeHtml(p.name)} · <span class="dist">${fmtDist(dist)}</span></div>
+      `;
+      layer.appendChild(el);
+    });
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---------- Chat efêmero ----------
+  async function pollChat(){
+    let res;
+    try{ res = await window.storage.get('chat:' + roomId, true); }
+    catch(err){ res = null; }
+    let msgs = [];
+    if(res && res.value){
+      try{ msgs = JSON.parse(res.value); }catch(e){ msgs = []; }
+    }
+    if(msgs.length !== knownChatCount){
+      knownChatCount = msgs.length;
+      renderChat(msgs);
+    }
+  }
+
+  function renderChat(msgs){
+    const box = $('chat-msgs');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    box.innerHTML = msgs.slice(-50).map(m => `
+      <div class="msg ${m.uid === userId ? 'me' : ''}">
+        <div class="who">${m.uid === userId ? 'você' : escapeHtml(m.name)}</div>
+        <div class="bubble">${escapeHtml(m.text)}</div>
+      </div>
+    `).join('');
+    if(atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  $('chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('chat-input');
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = '';
+    let msgs = [];
+    try{
+      const res = await window.storage.get('chat:' + roomId, true);
+      if(res && res.value) msgs = JSON.parse(res.value);
+    }catch(err){ msgs = []; }
+    msgs.push({ uid: userId, name: userName, text: text.slice(0,300), ts: Date.now() });
+    if(msgs.length > 80) msgs = msgs.slice(-80);
+    try{
+      await window.storage.set('chat:' + roomId, JSON.stringify(msgs), true);
+      knownChatCount = msgs.length;
+      renderChat(msgs);
+    }catch(err){
+      toast('Não deu pra enviar, tenta de novo');
+    }
+  });
+
+  $('chat-toggle').addEventListener('click', () => $('chat-sheet').classList.add('open'));
+  $('chat-close').addEventListener('click', () => $('chat-sheet').classList.remove('open'));
+
+  // ---------- Ações do topo ----------
+  $('copy-link-btn').addEventListener('click', async () => {
+    const link = location.origin + location.pathname + '?room=' + roomId;
+    try{
+      await navigator.clipboard.writeText(link);
+      toast('Link copiado! Manda pra galera 🚀');
+    }catch(err){
+      prompt('Copie o link da sala:', link);
+    }
+  });
+
+  $('leave-btn').addEventListener('click', () => {
+    cleanup();
+    location.href = location.pathname;
+  });
+
+  async function cleanup(){
+    if(stopped) return;
+    stopped = true;
+    if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+    if(pollTimer) clearInterval(pollTimer);
+    if(chatTimer) clearInterval(chatTimer);
+    try{ await window.storage.delete('loc:' + roomId + ':' + userId, true); }catch(err){}
+  }
+
+  window.addEventListener('resize', () => refreshPeers());
+})();
+</script>
+</body>
+</html>
