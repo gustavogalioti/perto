@@ -69,6 +69,8 @@
   }
   .room-badge b{ color:var(--text); letter-spacing:0.06em; }
   .hint{ font-size:12px; color:var(--muted); margin-top:14px; line-height:1.5; }
+  .conn-note{ font-size:12px; margin-top:10px; display:none; color:var(--muted); }
+  .conn-note.show{ display:block; }
 
   /* ---------- Sala ---------- */
   #room{ position:fixed; inset:0; display:none; flex-direction:column; }
@@ -184,6 +186,7 @@
     <input type="text" id="name-input" maxlength="24" placeholder="Seu nome" autocomplete="off">
     <button class="btn" id="gate-btn">Criar sala</button>
     <p class="hint" id="gate-hint">Ao entrar, vamos pedir permissão de localização — é o que faz o radar funcionar.</p>
+    <p class="conn-note" id="conn-note">Conectando…</p>
   </div>
 </div>
 
@@ -219,7 +222,7 @@
     <div id="chat-head">
       <div>
         <h3>Chat da sala</h3>
-        <span>Nada é salvo — some quando a página fecha</span>
+        <span>Some quando todos saem — não fica salvo pra sempre</span>
       </div>
       <button id="chat-close">✕</button>
     </div>
@@ -233,9 +236,26 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Firebase (Realtime Database) — sincroniza localização, presença e chat entre navegadores -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
 <script>
 (function(){
   "use strict";
+
+  // ---------- Firebase ----------
+  const firebaseConfig = {
+    apiKey: "AIzaSyBttptjiVsyZnj-FECRjTdl2srnxkEde0U",
+    authDomain: "perto-app-1b978.firebaseapp.com",
+    databaseURL: "https://perto-app-1b978-default-rtdb.firebaseio.com",
+    projectId: "perto-app-1b978",
+    storageBucket: "perto-app-1b978.firebasestorage.app",
+    messagingSenderId: "498762851927",
+    appId: "1:498762851927:web:620fbbfd10c2d13b252512"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
 
   // ---------- Utilidades ----------
   const $ = (id) => document.getElementById(id);
@@ -247,13 +267,13 @@
   let userName = '';
   let lastKnownPos = null;
   let deviceHeading = 0;
-  let hasCompass = false;
   let watchId = null;
-  let pollTimer = null;
-  let chatTimer = null;
   let lastLocWrite = 0;
-  let knownChatCount = 0;
   let stopped = false;
+  let locationsRef = null;
+  let chatRef = null;
+  let myLocRef = null;
+  let lastPeersForAngleRefresh = [];
 
   function toast(msg, ms){
     const t = $('toast');
@@ -299,6 +319,10 @@
     return (m/1000).toFixed(1) + ' km';
   }
 
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
   // ---------- Gate (tela inicial) ----------
   if(isJoining){
     $('gate-eyebrow').textContent = 'você foi convidado';
@@ -319,11 +343,21 @@
     userName = name.slice(0, 24);
     if(!roomId) roomId = makeRoomCode();
     history.replaceState(null, '', location.pathname + '?room=' + roomId);
+    $('gate-btn').disabled = true;
+    $('conn-note').classList.add('show');
     enterRoom();
   });
 
   // ---------- Entrar na sala ----------
   function enterRoom(){
+    locationsRef = db.ref('rooms/' + roomId + '/locations');
+    chatRef = db.ref('rooms/' + roomId + '/chat');
+    myLocRef = db.ref('rooms/' + roomId + '/locations/' + userId);
+
+    // Se a conexão cair (fechou a aba, perdeu internet), o Firebase remove
+    // automaticamente a minha localização — é o "fechou a página, fechou a sessão".
+    myLocRef.onDisconnect().remove();
+
     $('gate').style.display = 'none';
     $('room').style.display = 'flex';
     $('room-code-label').textContent = roomId;
@@ -331,11 +365,24 @@
     requestGeolocation();
     requestCompassIfNeeded();
 
-    pollTimer = setInterval(refreshPeers, 3000);
-    refreshPeers();
+    locationsRef.on('value', (snap) => {
+      const val = snap.val() || {};
+      const now = Date.now();
+      const peers = [];
+      Object.keys(val).forEach(uid => {
+        if(uid === userId) return;
+        const data = val[uid];
+        if(!data || now - data.ts > 30000) return; // sinal velho, ignora
+        peers.push(data);
+      });
+      renderBeacons(peers);
+    });
 
-    chatTimer = setInterval(pollChat, 2500);
-    pollChat();
+    chatRef.limitToLast(50).on('value', (snap) => {
+      const val = snap.val() || {};
+      const msgs = Object.values(val).sort((a,b) => a.ts - b.ts);
+      renderChat(msgs);
+    });
 
     window.addEventListener('pagehide', cleanup);
     window.addEventListener('beforeunload', cleanup);
@@ -365,12 +412,10 @@
 
   function requestCompassIfNeeded(){
     const start = () => {
-      hasCompass = true;
       window.addEventListener('deviceorientationabsolute', onOrientation, true);
       window.addEventListener('deviceorientation', onOrientation, true);
     };
     if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-      // iOS precisa de gesto do usuário; tentamos, se falhar seguimos com bússola fixa (norte para cima)
       DeviceOrientationEvent.requestPermission().then(res => {
         if(res === 'granted') start();
       }).catch(()=>{});
@@ -382,49 +427,27 @@
   function onOrientation(e){
     let heading;
     if(typeof e.webkitCompassHeading === 'number'){
-      heading = e.webkitCompassHeading; // iOS: já é a direção da bússola
+      heading = e.webkitCompassHeading;
     } else if(e.alpha != null){
-      heading = 360 - e.alpha; // aproximação para Android
+      heading = 360 - e.alpha;
     } else {
       return;
     }
     deviceHeading = (heading + 360) % 360;
     $('n-label').setAttribute('transform', `rotate(${-deviceHeading} 150 150)`);
+    renderBeacons(lastPeersForAngleRefresh);
   }
 
-  async function writeMyLocation(){
-    if(!lastKnownPos) return;
-    try{
-      await window.storage.set('loc:' + roomId + ':' + userId, JSON.stringify({
-        name: userName, lat: lastKnownPos.lat, lon: lastKnownPos.lon, ts: Date.now()
-      }), true);
-    }catch(err){ /* melhor esforço */ }
-  }
-
-  async function refreshPeers(){
-    if(!lastKnownPos && !stopped) { /* ainda mostra outros mesmo sem minha posição */ }
-    let list;
-    try{
-      list = await window.storage.list('loc:' + roomId + ':', true);
-    }catch(err){ return; }
-    if(!list || !list.keys) return;
-
-    const now = Date.now();
-    const peers = [];
-    for(const key of list.keys){
-      if(key === 'loc:' + roomId + ':' + userId) continue;
-      try{
-        const res = await window.storage.get(key, true);
-        if(!res || !res.value) continue;
-        const data = JSON.parse(res.value);
-        if(now - data.ts > 25000) continue; // sumiu (fechou a página / perdeu sinal)
-        peers.push(data);
-      }catch(err){ /* ignora entrada corrompida ou expirada */ }
-    }
-    renderBeacons(peers);
+  function writeMyLocation(){
+    if(!lastKnownPos || !myLocRef) return;
+    myLocRef.set({
+      name: userName, lat: lastKnownPos.lat, lon: lastKnownPos.lon,
+      ts: firebase.database.ServerValue.TIMESTAMP
+    }).catch(() => { /* melhor esforço */ });
   }
 
   function renderBeacons(peers){
+    lastPeersForAngleRefresh = peers;
     const layer = $('beacon-layer');
     layer.innerHTML = '';
     $('empty-state').style.display = peers.length === 0 ? 'block' : 'none';
@@ -452,7 +475,6 @@
       el.className = 'beacon';
       el.style.left = x + 'px';
       el.style.top = y + 'px';
-      const color = colorForUser(p.name + '-' + brg.toFixed(0));
       el.innerHTML = `
         <div class="dot" style="background:${colorForUser(p.name)}"></div>
         <div class="label">${escapeHtml(p.name)} · <span class="dist">${fmtDist(dist)}</span></div>
@@ -461,29 +483,11 @@
     });
   }
 
-  function escapeHtml(s){
-    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  // ---------- Chat efêmero ----------
-  async function pollChat(){
-    let res;
-    try{ res = await window.storage.get('chat:' + roomId, true); }
-    catch(err){ res = null; }
-    let msgs = [];
-    if(res && res.value){
-      try{ msgs = JSON.parse(res.value); }catch(e){ msgs = []; }
-    }
-    if(msgs.length !== knownChatCount){
-      knownChatCount = msgs.length;
-      renderChat(msgs);
-    }
-  }
-
+  // ---------- Chat ----------
   function renderChat(msgs){
     const box = $('chat-msgs');
     const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-    box.innerHTML = msgs.slice(-50).map(m => `
+    box.innerHTML = msgs.map(m => `
       <div class="msg ${m.uid === userId ? 'me' : ''}">
         <div class="who">${m.uid === userId ? 'você' : escapeHtml(m.name)}</div>
         <div class="bubble">${escapeHtml(m.text)}</div>
@@ -492,26 +496,18 @@
     if(atBottom) box.scrollTop = box.scrollHeight;
   }
 
-  $('chat-form').addEventListener('submit', async (e) => {
+  $('chat-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = $('chat-input');
     const text = input.value.trim();
-    if(!text) return;
+    if(!text || !chatRef) return;
     input.value = '';
-    let msgs = [];
-    try{
-      const res = await window.storage.get('chat:' + roomId, true);
-      if(res && res.value) msgs = JSON.parse(res.value);
-    }catch(err){ msgs = []; }
-    msgs.push({ uid: userId, name: userName, text: text.slice(0,300), ts: Date.now() });
-    if(msgs.length > 80) msgs = msgs.slice(-80);
-    try{
-      await window.storage.set('chat:' + roomId, JSON.stringify(msgs), true);
-      knownChatCount = msgs.length;
-      renderChat(msgs);
-    }catch(err){
-      toast('Não deu pra enviar, tenta de novo');
-    }
+    chatRef.push({
+      uid: userId,
+      name: userName,
+      text: text.slice(0,300),
+      ts: firebase.database.ServerValue.TIMESTAMP
+    }).catch(() => toast('Não deu pra enviar, tenta de novo'));
   });
 
   $('chat-toggle').addEventListener('click', () => $('chat-sheet').classList.add('open'));
@@ -533,16 +529,19 @@
     location.href = location.pathname;
   });
 
-  async function cleanup(){
+  function cleanup(){
     if(stopped) return;
     stopped = true;
     if(watchId !== null) navigator.geolocation.clearWatch(watchId);
-    if(pollTimer) clearInterval(pollTimer);
-    if(chatTimer) clearInterval(chatTimer);
-    try{ await window.storage.delete('loc:' + roomId + ':' + userId, true); }catch(err){}
+    if(locationsRef) locationsRef.off();
+    if(chatRef) chatRef.off();
+    if(myLocRef){
+      myLocRef.onDisconnect().cancel();
+      myLocRef.remove();
+    }
   }
 
-  window.addEventListener('resize', () => refreshPeers());
+  window.addEventListener('resize', () => renderBeacons(lastPeersForAngleRefresh));
 })();
 </script>
 </body>
