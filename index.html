@@ -121,6 +121,25 @@
     position:absolute; text-align:center; color:var(--muted); font-size:13px; max-width:220px; line-height:1.5;
   }
 
+  #front-caption{
+    position:absolute; top:-26px; left:50%; transform:translateX(-50%);
+    font-size:11px; color:var(--accent); white-space:nowrap; font-weight:600;
+  }
+
+  #guide-card{
+    position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:12px;
+    background:var(--panel); border:1px solid var(--ring); border-radius:16px;
+    padding:10px 16px; box-shadow:0 10px 24px rgba(0,0,0,0.35); z-index:4;
+    max-width:88%;
+  }
+  #guide-arrow{
+    font-size:26px; color:var(--accent); transition:transform .25s ease; flex-shrink:0;
+    transform-origin:50% 55%;
+  }
+  #guide-name{ font-size:13px; font-weight:600; }
+  #guide-instruction{ font-size:12px; color:var(--muted); }
+
   #status-strip{
     position:absolute; bottom:14px; left:0; right:0; display:flex; justify-content:center;
     pointer-events:none;
@@ -210,9 +229,19 @@
         </g>
         <text x="150" y="20" text-anchor="middle" class="n-label" id="n-label">N</text>
         <circle cx="150" cy="150" r="5" class="me-dot"/>
+        <!-- Marcador fixo: sempre representa PRA ONDE VOCÊ ESTÁ OLHANDO (o topo do celular) -->
+        <polygon points="150,2 141,20 159,20" fill="var(--accent)"/>
       </svg>
+      <div id="front-caption">☝️ isto é a sua frente</div>
       <div id="beacon-layer"></div>
       <div id="empty-state">Você está sozinho na sala por enquanto. Manda o link pra alguém entrar 👀</div>
+    </div>
+    <div id="guide-card" style="display:none;">
+      <div id="guide-arrow">➤</div>
+      <div id="guide-text">
+        <div id="guide-name"></div>
+        <div id="guide-instruction"></div>
+      </div>
     </div>
     <div id="status-strip"><span id="status-text">Localizando…</span></div>
   </div>
@@ -263,7 +292,13 @@
   let roomId = params.get('room');
   const isJoining = !!roomId;
 
-  const userId = 'u' + Math.random().toString(36).slice(2, 10);
+  // Mantém o mesmo ID durante a mesma aba (sobrevive a reload), então um refresh
+  // atualiza a sua própria entrada em vez de criar uma duplicada no radar dos outros.
+  let userId = sessionStorage.getItem('perto_uid');
+  if(!userId){
+    userId = 'u' + Math.random().toString(36).slice(2, 10);
+    sessionStorage.setItem('perto_uid', userId);
+  }
   let userName = '';
   let lastKnownPos = null;
   let deviceHeading = 0;
@@ -446,11 +481,24 @@
     }).catch(() => { /* melhor esforço */ });
   }
 
+  function turnInstruction(angle){
+    // angle: 0 = na sua frente, 90 = à sua direita, 180 = atrás, 270 = à sua esquerda
+    if(angle >= 337.5 || angle < 22.5)   return 'Está bem na sua frente — siga reto';
+    if(angle < 67.5)   return 'Vire um pouco à direita';
+    if(angle < 112.5)  return 'Vire à direita';
+    if(angle < 157.5)  return 'Vire bastante à direita (quase de costas)';
+    if(angle < 202.5)  return 'Está atrás de você — dê meia-volta';
+    if(angle < 247.5)  return 'Vire bastante à esquerda (quase de costas)';
+    if(angle < 292.5)  return 'Vire à esquerda';
+    return 'Vire um pouco à esquerda';
+  }
+
   function renderBeacons(peers){
     lastPeersForAngleRefresh = peers;
     const layer = $('beacon-layer');
     layer.innerHTML = '';
     $('empty-state').style.display = peers.length === 0 ? 'block' : 'none';
+    $('guide-card').style.display = 'none';
 
     if(!lastKnownPos){
       if(peers.length){
@@ -463,10 +511,15 @@
     const size = wrap.clientWidth;
     const cx = size/2, cy = size/2, radius = size/2 - 24;
 
+    let nearest = null;
+
     peers.forEach(p => {
       const brg = bearingTo(lastKnownPos.lat, lastKnownPos.lon, p.lat, p.lon);
       const dist = distanceMeters(lastKnownPos.lat, lastKnownPos.lon, p.lat, p.lon);
       const angle = ((brg - deviceHeading) + 360) % 360;
+
+      if(!nearest || dist < nearest.dist) nearest = { p, dist, angle };
+
       const rad = toRad(angle);
       const x = cx + radius * Math.sin(rad);
       const y = cy - radius * Math.cos(rad);
@@ -481,6 +534,15 @@
       `;
       layer.appendChild(el);
     });
+
+    // Cartão de orientação: sempre guia para a pessoa mais próxima.
+    if(nearest){
+      const card = $('guide-card');
+      card.style.display = 'flex';
+      $('guide-arrow').style.transform = `rotate(${nearest.angle}deg)`;
+      $('guide-name').textContent = `${nearest.p.name} · ${fmtDist(nearest.dist)}`;
+      $('guide-instruction').textContent = turnInstruction(nearest.angle);
+    }
   }
 
   // ---------- Chat ----------
